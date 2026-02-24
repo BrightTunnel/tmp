@@ -1,1 +1,31 @@
 
+1. Collection
+	1.1. Full filter (search requests) inventory (with scope, owner, involment) ***
+	1.2. Filter permissions (Exposure risk) ***
+	1.3. Filter belongs to an inactive/deleted/disabled user ***
+	1.4. Orphaned filters (not used by Boards) **
+	2.1. Board core inventory *
+	2.2. Board referencing missing filters ***
+	3. Quick filters inventory **
+	4. Springs inventory *
+	5. Others (Subscriptions, Scripts, etc.)
+	6. Filter Popularity ***
+
+2. Extract/Report active risky filters in order of impact
+	1. Un-scoped queries (missing project =, etc)
+	2. History operators (was, changed)
+	3. Text ~
+	4. Leading wildcards (~ "%find this")
+	5. Large 'in ()' lists
+	6. Boards filters using risky JQL
+
+3. Cleaning, Optimisation
+	1. Hide inactive filters by making them non-public and/or reassigne to admin/NPID. Keep altered inventory.
+	2. Extract/Report active risky filters in order of impact, fix manually
+	3. Unwind Nested filters (sub-filters) (scripted)
+
+4. Solving administrative problems during clean-up activities
+	JIRA administrators are unable to view or modify private filters and dashboards.
+	When managing a large number of filters in JIRA, distinguish between private and shared filters
+
+
