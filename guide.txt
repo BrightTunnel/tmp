@@ -1,1 +1,101 @@
 
+
+--filters (search requests) cleaning and optimisation
+
+
+--Finding unused Jira filters using SQL
+--In Jira Data Center, key database tables managing, permitting, and affecting filters include 
+	--searchrequest (core filter definitions)
+	--sharepermissions (sharing/visibility)
+	--AO_60DB71_RAPIDVIEW (Agile board filters)
+	--AO_60DB71_BOARDADMINS for ownership, store JQL, permissions, and links to dashboards or boards.
+
+SELECT * from searchrequest where id not in (SELECT 10300 from "AO_60DB71_RAPIDVIEW");
+SELECT * from searchrequest where id not in (SELECT saved_filter_id from "AO_60DB71_RAPIDVIEW"); --all saved filters that are not referenced by any Jira Software board.
+SELECT * from searchrequest; --The primary table storing saved filters, including the filter name, description, owner (authorname), and the JQL query (reqcontent).
+SELECT * FROM sharepermissions; --Determines who can view or edit a filter. It links to searchrequest.id to define sharing with groups, projects, or globally.
+SELECT * FROM app_user;
+SELECT * FROM portalpage;
+SELECT * FROM portletconfiguration; --dashboard gadgets
+SELECT * FROM gadgetuserpreference;
+SELECT * FROM filtersubscription; --Stores data related to scheduled email subscriptions for filters. 
+SELECT * FROM "AO_60DB71_BOARDADMINS"; --Defines administrators for rapid boards, often necessary to check when troubleshooting broken or uneditable board filters.
+SELECT * FROM "AO_60DB71_RAPIDVIEW"; --boards (AO_60DB71_ Jira Agile). Stores Agile (Scrum/Kanban) board configurations. The SAVED_FILTER_ID column links boards to specific filters in the searchrequest table.
+SELECT "ID", "SAVED_FILTER_ID", "NAME", "OWNER_USER_NAME", "KAN_PLAN_ENABLED", "OLD_DONE_ISSUES_CUTOFF", "REFINED_VELOCITY_ACTIVE", "SHOW_DAYS_IN_COLUMN", "SHOW_EPIC_AS_PANEL", "SPRINTS_ENABLED", "SWIMLANE_STRATEGY", "CARD_COLOR_STRATEGY" FROM "AO_60DB71_RAPIDVIEW";
+SELECT "ID", "LONG_QUERY", "QUERY", "NAME", "POS", "DESCRIPTION", "RAPID_VIEW_ID" FROM "AO_60DB71_QUICKFILTER";
+SELECT "ID", "LONG_QUERY", "QUERY", "RAPID_VIEW_ID", "SECTION" FROM "AO_60DB71_SUBQUERY";
+
+--Filter Ownership: Defined by authorname in searchrequest.
+--Board Filtering: AO_60DB71_RAPIDVIEW maps ID (board) to SAVED_FILTER_ID (filter).
+--Visibility/Permissions: sharepermissions maps entityid (filter id) to user/group/project constraints. 
+--Common Database Queries
+    SELECT filtername FROM searchrequest WHERE id NOT IN (SELECT entityid FROM sharepermissions); --Finds private filters. --List Private/Shared Filters
+    SELECT filtername FROM searchrequest WHERE id IN (SELECT entityid FROM sharepermissions); --Finds shared filters. --List Private/Shared Filters
+	SELECT * FROM searchrequest sr JOIN "AO_60DB71_RAPIDVIEW" arv ON arv."SAVED_FILTER_ID" = sr.id;. --    Find Board Filters
+
+
+--https://support.atlassian.com/jira/kb/how-to-list-private-and-shared-filters-in-jira-from-database/ --How to list Private and Shared filters in Jira from Database?
+--This article addresses two common scenarios faced by JIRA administrators related to private filters and dashboards:
+--1: JIRA administrators are unable to view or modify private filters and dashboards.
+--	This limitation can become a significant issue if a user leaves the company and the administrator needs to access the user’s private filters and dashboards.
+--	These private items are not displayed under Shared Filters or Shared Dashboards, creating potential blockers for administrative tasks.
+--2: When managing a large number of filters in JIRA, distinguishing between private and shared filters is essential, particularly during clean-up activities.
+--This article provides specific database queries to help identify which filters are private and which are shared.
+SELECT * from portalpage where id not in (SELECT entityid from sharepermissions where entitytype='PortalPage'); --For private Dashboard
+--For private Filter, there are 2 ways to fetch the same result. Either Query #1 or Query #2 can be used to fetch the requested details:
+SELECT filtername FROM searchrequest WHERE id NOT IN (SELECT entityid FROM sharepermissions); --For private Filter #1
+SELECT * from searchrequest where id not in (SELECT entityid from sharepermissions where entitytype='SearchRequest'); --For private filter #2
+
+--JIRA DC SQL QUERY TO GET FILTERS USAGE STATISTIC / HISTORY
+--Jira Data Center does not natively log filter usage statistics (execution count, last run time) in the database, making it impossible to directly query for "last used" data
+--You can, however, query the database to identify filters, their owners, and how they are shared.
+SELECT sr.id AS filter_id, sr.filtername, u.lower_user_name AS owner, sr.reqcontent AS jql_query from searchrequest sr join app_user u ON sr.authorname = u.user_key;
+
+SELECT sr.filtername, sp.sharetype, sp.param1 AS group_or_project_id, sr.username AS owner FROM sharepermissions sp
+JOIN searchrequest sr ON sp.entityid = sr.id WHERE sp.entitytype = 'SearchRequest';
+
+--Filter Usage Statistics (Workaround)
+SELECT distinct p.pagename AS dashboard_name, sr.filtername AS filter_name FROM portalpage p
+JOIN sharepermissions sp ON p.id = sp.entityid
+JOIN searchrequest sr ON sp.entityid = sr.id WHERE sr.reqcontent LIKE '%filterid=%'; -- This is an approximation
+
+--https://community.atlassian.com/forums/Jira-questions/Definitive-ways-to-clean-up-unused-filters/qaq-p/2682407 --Definitive ways to clean-up unused filters 
+--https://support.atlassian.com/jira/kb/how-to-find-list-of-saved-filters-using-certain-custom-field-string-in-jql/ --How to find list of saved filters using certain custom field/string in JQL
+--https://community.atlassian.com/forums/Jira-questions/How-to-cleanup-unused-filters-in-Jira/qaq-p/1809948 --How to cleanup unused filters in Jira
+--https://community.atlassian.com/forums/Jira-Cloud-Admins-discussions/Unused-Filters-any-way-to-see-which-filters-are-not-being-used/td-p/2281424 --Unused Filters - any way to see which filters are *not* being used in dashboard gadgets? 
+--https://community.atlassian.com/forums/Jira-questions/Query-or-ways-to-find-filters-which-linked-with-any-dashboard-or/qaq-p/1064874 --Query or ways to find filters which linked with any dashboard or board (Filters Not Used in Dashboards)
+--For finding which filters are used on Agile/Software boards you can use the following SQL query:
+SELECT "AO_60DB71_RAPIDVIEW"."NAME" as BoardName, "AO_60DB71_RAPIDVIEW"."ID" as BoardID, sr.* from searchrequest sr join "AO_60DB71_RAPIDVIEW" on "AO_60DB71_RAPIDVIEW"."SAVED_FILTER_ID" = sr.id
+--As for how to find which saved filters are being used in a dashboard; that poses a more difficult problem to solve.
+--I think this is because in my testing I found that some gadgets store this data differently than others.
+--I found I needed to use two different SQL queries to find these filters that might be stored differently.
+--Query #1 (In this first one, the userprefvalue sometimes stores the filter name for a gadget using it.)
+SELECT pp.id, pp.username, pp.pagename, s.filtername, s.id, gup.USERPREFVALUE FROM portalpage pp
+	JOIN portletconfiguration pc on pp.id = pc.portalpage
+	JOIN gadgetuserpreference gup on pc.ID = gup.portletconfiguration
+	JOIN searchrequest s on gup.userprefvalue=s.filtername;
+--Query #2
+--In this example, sometimes gadgets use a syntax of filter-12345 in that same field where that 12345 is the id of the filter.
+--I did come across another answer that almost worked for me for this one in https://community.atlassian.com/t5/Jira-questions/Any-way-to-determine-which-filters-are-used-on-dashboards/qaq-p/326245
+--I found that I had to use the cast function in order to compare the values in that field.
+SELECT pp.id, pp.username, pp.pagename, s.filtername, s.id, gup.USERPREFVALUE FROM portalpage pp
+	JOIN portletconfiguration pc on pp.id = pc.portalpage
+	JOIN gadgetuserpreference gup on pc.ID = gup.portletconfiguration
+	JOIN searchrequest s on cast(s.ID AS text) = SUBSTRING(gup.USERPREFVALUE,8,5) WHERE gup.USERPREFVALUE like 'filter%' order by pp.ID;
+
+
+
+--#other meta SQL
+	--SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'AO_%SIL%'; --AO_1B54DA_KRUNNABLESILS
+
+--Range of users, making most of the JQLs
+select count(*) cnt, sr.authorname, cu.display_name
+	from searchrequest sr
+	join cwd_user cu on sr.authorname  = 'JIRAUSER' || cu.id 
+	group by sr.authorname, cu.display_name order by cnt desc
+--select * from searchrequest sr; --sr.authorname: JIRAUSER10100
+--select * from cwd_user cu;
+
+
+
+
