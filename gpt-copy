@@ -1,0 +1,339 @@
+Below is an enterprise-grade Jira audit toolkit used before migrations from **Jira Data Center / Jira Server to Jira Cloud.
+It is designed for large environments (1k–10k projects, 50k+ workflows, heavy scripting) and focuses on:
+automation discovery
+script extraction
+migration risk detection
+configuration complexity scoring
+The toolkit structure mirrors what is typically used in enterprise migration readiness assessments.
+Enterprise Jira Migration Audit Toolkit
+Audit modules
+Copy code
+
+01_instance_inventory
+02_projects
+03_workflows
+04_workflow_scripts
+05_custom_fields
+06_filters
+07_agile_boards
+08_dashboards
+09_permissions
+10_listeners
+11_scheduled_jobs
+12_plugins
+13_risk_scoring
+1. Instance Inventory
+Jira version
+SQL
+Copy code
+SELECT propertyvalue AS jira_version
+FROM propertystring
+WHERE id='jira.version';
+Node count (cluster size)
+SQL
+Copy code
+SELECT *
+FROM clusternode;
+2. Project Inventory
+SQL
+Copy code
+SELECT
+id,
+pkey,
+pname,
+projecttype,
+lead,
+archived
+FROM project
+ORDER BY pkey;
+3. Workflow Inventory
+SQL
+Copy code
+SELECT
+id,
+workflowname,
+LENGTH(descriptor) AS xml_size
+FROM jiraworkflows
+ORDER BY xml_size DESC;
+Large XML workflows correlate with migration complexity.
+4. Workflow → Project Usage
+SQL
+Copy code
+SELECT
+p.pkey,
+w.workflowname
+FROM nodeassociation na
+JOIN project p
+ ON p.id=na.source_node_id
+JOIN workflowscheme ws
+ ON ws.id=na.sink_node_id
+JOIN workflowschemeentity wse
+ ON wse.scheme=ws.id
+JOIN jiraworkflows w
+ ON w.workflowname=wse.workflow
+WHERE na.association_type='ProjectScheme';
+5. Script Detection in Workflows
+SQL
+Copy code
+SELECT
+workflowname,
+CASE
+ WHEN descriptor ILIKE '%groovy%' THEN 'groovy'
+ WHEN descriptor ILIKE '%scriptrunner%' THEN 'scriptrunner'
+ WHEN descriptor ILIKE '%sil%' THEN 'sil'
+ WHEN descriptor ILIKE '%jmwe%' THEN 'jmwe'
+ ELSE 'unknown'
+END AS script_type
+FROM jiraworkflows
+WHERE descriptor ILIKE '%script%'
+ OR descriptor ILIKE '%groovy%';
+6. Extract Embedded Groovy Scripts
+SQL
+Copy code
+SELECT
+workflowname,
+substring(descriptor from '.{0,500}groovy.{0,500}')
+FROM jiraworkflows
+WHERE descriptor ILIKE '%groovy%';
+Often used with ScriptRunner for Jira.
+7. JMWE Workflow Scripts
+SQL
+Copy code
+SELECT
+workflowname
+FROM jiraworkflows
+WHERE descriptor ILIKE '%jmwe%';
+Plugin: JMWE
+8. SIL Scripts
+SQL
+Copy code
+SELECT
+workflowname
+FROM jiraworkflows
+WHERE descriptor ILIKE '%sil%';
+Plugin: Power Scripts for Jira
+9. Scripted Custom Fields
+SQL
+Copy code
+SELECT
+cfname,
+customfieldtypekey
+FROM customfield
+WHERE customfieldtypekey ILIKE '%script%';
+10. Custom Field Inventory
+SQL
+Copy code
+SELECT
+id,
+cfname,
+customfieldtypekey
+FROM customfield
+ORDER BY cfname;
+11. Custom Field Contexts
+SQL
+Copy code
+SELECT
+cf.cfname,
+p.pkey
+FROM configurationcontext cc
+JOIN customfield cf ON cf.id=cc.customfield
+LEFT JOIN project p ON p.id=cc.project;
+12. JQL Filter Inventory
+SQL
+Copy code
+SELECT
+id,
+filtername,
+authorname,
+jql
+FROM searchrequest;
+13. Expensive JQL Detection
+SQL
+Copy code
+SELECT
+filtername,
+jql
+FROM searchrequest
+WHERE jql ILIKE '%text%'
+OR jql ILIKE '%~%'
+OR jql ILIKE '%issueFunction%';
+14. Filter Usage
+SQL
+Copy code
+SELECT
+sr.filtername,
+count(*) AS usage
+FROM portalpage pp
+JOIN searchrequest sr
+ ON sr.authorname=pp.username
+GROUP BY sr.filtername;
+15. Agile Boards
+Boards from Jira Software
+SQL
+Copy code
+SELECT
+id,
+name,
+filter_id
+FROM AO_60DB71_RAPIDVIEW;
+16. Board → Filter Mapping
+SQL
+Copy code
+SELECT
+rv.name,
+sr.filtername,
+sr.jql
+FROM AO_60DB71_RAPIDVIEW rv
+JOIN searchrequest sr
+ON sr.id=rv.filter_id;
+17. Dashboards
+SQL
+Copy code
+SELECT
+id,
+pagename,
+username
+FROM portalpage;
+18. Dashboard Gadgets
+SQL
+Copy code
+SELECT
+portalpage,
+portlet_id,
+dashboard_module_complete_key
+FROM portletconfiguration;
+19. Permission Schemes
+SQL
+Copy code
+SELECT
+id,
+name
+FROM permissionscheme;
+20. Project Permission Mapping
+SQL
+Copy code
+SELECT
+p.pkey,
+ps.name
+FROM nodeassociation na
+JOIN project p
+ON p.id=na.source_node_id
+JOIN permissionscheme ps
+ON ps.id=na.sink_node_id
+WHERE na.sink_node_entity='PermissionScheme';
+21. Event Listeners
+SQL
+Copy code
+SELECT
+pluginkey,
+pluginenabled
+FROM pluginstate
+WHERE pluginkey ILIKE '%listener%';
+22. Scheduled Jobs
+SQL
+Copy code
+SELECT
+job_id,
+job_runner_key,
+schedule
+FROM clusteredjob;
+23. Active Objects Plugin Tables
+SQL
+Copy code
+SELECT
+table_name
+FROM information_schema.tables
+WHERE table_name LIKE 'AO_%';
+This reveals plugin configuration storage.
+24. ScriptRunner Tables
+SQL
+Copy code
+SELECT
+table_name
+FROM information_schema.tables
+WHERE table_name ILIKE '%script%';
+25. Automation Plugins Installed
+SQL
+Copy code
+SELECT
+pluginkey
+FROM pluginstate
+WHERE pluginkey ILIKE '%automation%'
+OR pluginkey ILIKE '%script%';
+26. Workflow Complexity Scoring
+Example heuristic:
+SQL
+Copy code
+SELECT
+workflowname,
+LENGTH(descriptor) AS size,
+CASE
+ WHEN LENGTH(descriptor)>20000 THEN 'HIGH'
+ WHEN LENGTH(descriptor)>10000 THEN 'MEDIUM'
+ ELSE 'LOW'
+END complexity
+FROM jiraworkflows
+ORDER BY size DESC;
+27. Project Automation Risk Score
+Example calculation:
+SQL
+Copy code
+SELECT
+p.pkey,
+count(w.workflowname) AS workflows
+FROM project p
+JOIN nodeassociation na
+ ON na.source_node_id=p.id
+JOIN workflowscheme ws
+ ON ws.id=na.sink_node_id
+JOIN workflowschemeentity wse
+ ON wse.scheme=ws.id
+JOIN jiraworkflows w
+ ON w.workflowname=wse.workflow
+GROUP BY p.pkey
+ORDER BY workflows DESC;
+Recommended Output Structure
+Copy code
+
+audit/
+ ├ instance.csv
+ ├ projects.csv
+ ├ workflows.csv
+ ├ workflow_scripts.csv
+ ├ custom_fields.csv
+ ├ scripted_fields.csv
+ ├ filters.csv
+ ├ boards.csv
+ ├ dashboards.csv
+ ├ permissions.csv
+ ├ plugins.csv
+ ├ jobs.csv
+ └ risk_scores.csv
+Typical Migration Insights Produced
+From this dataset you can determine:
+Area
+Insight
+workflows
+migration complexity
+scripts
+unsupported automation
+custom fields
+cloud compatibility
+filters
+inefficient JQL
+boards
+dependency graph
+dashboards
+gadget compatibility
+plugins
+migration blockers
+If you'd like, I can also generate a “deep automation discovery toolkit” (100+ queries) that extracts things most migrations miss, including:
+ScriptRunner Groovy bodies
+workflow transition counts
+listener scripts
+REST endpoints
+SLA configs
+JQL performance scoring
+workflow graph complexity
+automation migration difficulty scoring
+This is the toolkit typically used when auditing very large Jira instances (5M–50M issues) before Cloud migration.
