@@ -1,1 +1,144 @@
+#--Jira DC SQL to list all projects, it's workflow schemes, all workflows, issue type schemes and issue types.
+	Project can be associated with only one workfiow scheme.
+	Project can be associated with only one issue type scheme.
+	Workflow scheme can contain multiple workflows, each mapped to a different issue type.
+	If you want to add new workflows, you would have to create new issue types and then add these to your existing workflow scheme.
+
+#--WF, Issue Type Scheme
+	https://community.atlassian.com/forums/Jira-questions/How-to-find-all-issue-types-defined-in-an-Issue-Type-Scheme-via/qaq-p/2518812 --How to find all issue types defined in an Issue Type Scheme via SQL query
+	https://community.atlassian.com/forums/Jira-questions/List-of-all-issue-types-per-projects-in-Jira-SQL-query/qaq-p/2431614 --List of all issue types per projects in Jira - SQL query
+	https://community.atlassian.com/forums/Jira-questions/Need-to-get-a-list-of-Projects-their-Issue-Type-Schemes-and/qaq-p/2817215 --Need to get a list of Projects, their Issue Type Schemes and Issue Types from the database
+	https://confluence.atlassian.com/jirasoftwareserver103/workflows-1489806071.html --Workflows
+	https://support.atlassian.com/jira/kb/get-list-all-the-statuses-used-in-all-the-active-workflows-from-database --!Get list all the statuses used in all the active workflows from database
+	https://support.atlassian.com/jira/kb/how-to-find-workflows-associated-with-a-status-from-the-database-in-jira --How to find workflows associated with a status from the database in Jira
+	https://support.atlassian.com/jira/kb/how-to-find-projects-statistics-based-off-issue-type-schemes --How to find Projects Statistics based off Issue Type Schemes
+	https://support.atlassian.com/jira/kb/how-to-retrieve-a-list-of-workflows-associated-with-each-project-in-jira-data-center-using-sql-queries --How to retrieve a list of workflows associated with each project in Jira Data Center using SQL queries
+	https://support.atlassian.com/jira/kb/how-to-use-sql-query-to-look-for-workflows-without-a-specific-screen-in-any-transition --How to use SQL query to look for workflows without a specific screen in any transition
+	https://support.atlassian.com/jira/kb/list-active-workflows-in-jira-dc-with-project-and-issue-type-filters --List active workflows in Jira DC with project and issue type filters
+	https://www.postman.com/api-evangelist/atlassian-jira/request/r2x2nzn/get-issue-types-for-workflows-in-workflow-scheme --Get Issue Types For Workflows In Workflow Scheme {API}
+
+#--Project: used fields and screens
+	https://support.atlassian.com/jira/kb/how-to-list-all-fields-and-screens-in-use-by-a-project-in-jira --How to list all fields and screens in use by a Project in Jira
+	https://www.reddit.com/r/jira/comments/8y0htx/simple_question_about jira_that_doenst_have_a --When creating a new issue, I want the fields on my screen to change based on the Issue Type selection, regardless of what project I am in. 
+
+#--Find Scripts and automation
+	https://confluence.atlassian.com/jirakb/how-to-identify-fields-with-custom-javascripts-in-their-description-in-jira-1101934366.html --How to identify fields with custom Javascript in their description in Jira Data Center / Server
+
+#--XRay
+	https://docs.getxray.app/space/XRAY/301468387/REST+API --REST API 
+
+#--Captcha auto reset
+	https://support.atlassian.com/jira/kb/user-receives-repeated-captcha-prompts-on-login-to-jira-data-center --User receives repeated CAPTCHA prompts on login to Jira Data Center
+	https://jira.atlassian.com/browse/JRASERVER-68111 --Create REST endpoints for checking and resetting CAPTCHA
+	https://community.atlassian.com/forums/Jira-questions/Reset-Captcha-Jira-data-center/qaq-p/2502594 --Reset Captcha - Jira data center 
+	https://wiki.vertuna.com/spaces/CONFIFORMS/pages/2359482/Creating+feedback+form+with+captcha+in+Confluence --Creating feedback form with captcha in Confluence
+	https://wiki.vertuna.com/spaces/CONFIFORMS/pages/9864128/Configuring+ConfiForms+IFTTT+actions+and+rules --Configuring ConfiForms IFTTT actions and rules
+	https://docs.atlassian.com/bitbucket-server/rest/7.4.0/bitbucket-rest.html#idp25 --/rest/api/1.0/admin/users/captcha?name
+
+#--wiki
+	https://confluence.atlassian.com/jirakb/list-of-jira-server-ao-table-names-and-vendors-973498988.html --List of Jira Data Center AO table names and vendors
+
+select p.pkey, count(w.workflowname) AS workflows FROM project p
+	JOIN nodeassociation na ON na.source_node_id=p.id
+	JOIN workflowscheme ws ON ws.id=na.sink_node_id
+	JOIN workflowschemeentity wse ON wse.scheme=ws.id
+	JOIN jiraworkflows w ON w.workflowname=wse.workflow
+	GROUP BY p.pkey ORDER BY workflows DESC;
+
+select workflowname, regexp_matches(descriptor, 'step id="[0-9]+" name="Open"', 'g') AS matches FROM jiraworkflows;
+select jwf.workflowname, xmlt.name::text from jiraworkflows jwf, XMLTABLE('//step' PASSING xml(jwf.descriptor) columns id INTEGER PATH '@id', name TEXT PATH '@name') xmlt where xmlt.name='Approved';
+
+
+
+--!Get list all the statuses used in all the active workflows from database
+	https://support.atlassian.com/jira/kb/get-list-all-the-statuses-used-in-all-the-active-workflows-from-database
+select j.id, j.workflowname, workflow_step.name as statusname, workflow_step.statusid
+	from jiraworkflows j,
+		XMLTABLE('//workflow/steps/step' passing xmlparse(document descriptor) columns id int path '@id', name text path '@name', statusid text path 'meta[@name = "jira.status.id"]' default null) as workflow_step
+	join issuestatus i on workflow_step.statusid = i.id;
+
+
+--How to find Projects Statistics based off Issue Type Schemes
+	https://support.atlassian.com/jira/kb/how-to-find-projects-statistics-based-off-issue-type-schemes
+	--Number of issues per issue type per project for a specific issue type scheme
+SELECT p.pname as "Project Name", fcs.configname AS "Issue Type Scheme", it.pname as "Issue Type", COUNT(i.id) as "Issue Count" 
+	FROM jiraissue i 
+	INNER JOIN project p ON i.project = p.id 
+	INNER JOIN issuetype it ON it.id = i.issuetype 
+	INNER join configurationcontext cc on p.id = cc.project
+	INNER JOIN fieldconfigscheme fcs ON cc.fieldconfigscheme = fcs.ID 
+	WHERE 1=1 GROUP BY p.id, it.id, fcs.configname ORDER BY p.pname, it.pname; --WHERE 1=1 AND fcs.configname = 'Default Issue Type Scheme' GROUP BY p.id, it.id, fcs.configname ORDER BY p.pname;
+
+
+--How to retrieve a list of workflows associated with each project in Jira Data Center using SQL queries
+	https://support.atlassian.com/jira/kb/how-to-retrieve-a-list-of-workflows-associated-with-each-project-in-jira-data-center-using-sql-queries 
+SELECT p.id AS project_id, p.pkey AS project_key, p.pname AS project_name, ws.name AS workflow_scheme_name,wse.workflow AS workflow_name
+	FROM project p
+	LEFT OUTER JOIN nodeassociation na ON na.source_node_id = p.id AND na.sink_node_entity = 'WorkflowScheme'
+	LEFT OUTER JOIN workflowscheme ws ON ws.id = na.sink_node_id
+	LEFT OUTER JOIN workflowschemeentity wse ON wse.scheme = ws.id
+	ORDER BY p.pkey;
+
+
+--How to use SQL query to look for workflows without a specific screen in any transition
+	https://support.atlassian.com/jira/kb/how-to-use-sql-query-to-look-for-workflows-without-a-specific-screen-in-any-transition 
+select j.id, j.workflowname, workflow_action.name as transition_name, workflow_action.view, workflow_action.fieldscreen, workflow_step.name as statusname, workflow_step.statusid
+	from jiraworkflows j, 
+	XMLTABLE('//workflow/common-actions/action'
+		passing xmlparse(document descriptor)
+		columns id int path '@id', name text path '@name', view text path '@view' default null, fieldscreen int path 'meta[@name = "jira.fieldscreen.id" and text() != ""]' default null, next_step int path 'results/unconditional-result/@step'
+	) as workflow_action 
+	join XMLTABLE('//workflow/steps/step'
+		passing xmlparse(document descriptor)
+		columns id int path '@id', name text path '@name', statusid text path 'meta[@name = "jira.status.id"]' default null
+	) as workflow_step on workflow_action.next_step = workflow_step.id 
+	join issuestatus i on workflow_step.statusid = i.id
+	where i.statuscategory = 3 and workflow_action.fieldscreen is null;
+
+
+--List active workflows in Jira DC with project and issue type filters
+	https://support.atlassian.com/jira/kb/list-active-workflows-in-jira-dc-with-project-and-issue-type-filters
+SELECT DISTINCT "Workflow Name"
+	FROM (
+		SELECT pkey AS "Project Key", workflow AS "Workflow Name", pname AS "Issue Type"
+			FROM (
+				SELECT p.pkey, wse.workflow, it.pname
+					FROM nodeassociation n, project p, workflowscheme ws, workflowschemeentity wse, issuetype it
+						WHERE p.ID = n.source_node_ID
+						AND n.source_node_entity = 'Project'
+						AND ws.ID = n.SINK_NODE_ID
+						AND wse.scheme = ws.ID
+						AND wse.issuetype = it.id
+						AND n.sink_node_entity = 'WorkflowScheme'
+						GROUP BY wse.workflow, p.pkey, it.id
+				union
+					SELECT p.pkey, wse.workflow, it.pname
+						FROM nodeassociation n, project p, workflowscheme ws, workflowschemeentity wse, issuetype it, configurationcontext cc, optionconfiguration oc
+						WHERE p.ID = n.source_node_ID
+						AND n.source_node_entity = 'Project'
+						AND ws.ID = n.SINK_NODE_ID
+						AND wse.scheme = ws.ID
+						AND wse.issuetype = '0'
+						AND n.sink_node_entity = 'WorkflowScheme'
+						AND oc.fieldconfig = cc.fieldconfigscheme
+						AND it.id = oc.optionid
+						AND p.id = cc.project
+						GROUP BY wse.workflow, p.pkey, it.id
+			) as temp ORDER BY workflow
+	) AS subquery;
+
+
+select * FROM project p;
+select * FROM jiraissue i;
+select * FROM nodeassociation na;
+select * FROM workflowscheme ws;
+select * FROM workflowschemeentity wse;
+select * FROM jiraworkflows w;
+select * FROM issuetype it;
+select * FROM issuestatus ist; --[Open, In Progress, Reopened, Resolved, Closed, Under Review, Approved, DONE, Cancelled, Rejected]
+select * FROM issuelinktype ilt; --is blocked by, etc
+select * FROM jiraworkflowstatuses j;
+select * FROM configurationcontext;
+select * FROM fieldconfigscheme; --[Default Issue Type Scheme,..]
+
 
