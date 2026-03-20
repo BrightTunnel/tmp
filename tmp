@@ -1,5 +1,1 @@
-Design and implement a daily automated pipeline that parses Jira Data Center logs and REST access logs to identify slow-performing JQL queries. The system should extract query details (JQL, execution time, user, timestamp), normalize queries to group similar patterns, and enrich results by mapping each query to its owner (user, saved filter, dashboard, or board).
 
-Aggregate the data on a daily basis to calculate key performance metrics such as execution count, average/max duration, and overall impact score (frequency × latency). Store results in a structured format and generate a ranked report highlighting the highest-impact and slowest queries, along with their owners.
-
-The output should support operational visibility and optimization efforts, enabling teams to identify inefficient queries and take corrective actions.
